@@ -1,0 +1,405 @@
+---
+title: Personalized Marketing - Customer Analysis For Customer Behavior and Predicting
+  The Likelihood Of Marketing Engagement
+author: "Aditya Phulallwar"
+date: '2022-06-19'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Dataset Intro:
+The IBM Watson Marketing Customer Value Data can be used analyze all relevant customer data and develop focused customer retention programs.Understand customer demographics and buying behavior. Use predictive analytics to analyze the most profitable customers and how they interact. Take targeted actions to increase profitable customer response, retention, and growth.
+
+avialable at [link](https://www.kaggle.com/datasets/pankajjsh06/ibm-watson-marketing-customer-value-data?resource=download&select=WA_Fn-UseC_-Marketing-Customer-Value-Analysis.csv)
+
+```{r include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(caTools)
+library(randomForest)
+library(ROCR)
+```
+
+```{r echo=FALSE}
+# Load Data
+df <- read.csv("Data/WA_Fn-UseC_-Marketing-Customer-Value-Analysis.csv", header = TRUE)
+kable(head(df))
+```
+
+There is a column named *Response*, which contains information about whether a customer responded to the marketing efforts. Also, the *Renew.Offer.Type* and *Sales.Channel* columns represent the type of renewal offer presented to the customer and which sales channel was used to contact the customer. There are numerous other columns that represent the socio-economic backgrounds of the customers and types of insurance coverages that the customers currently have. 
+
+```{r include=FALSE}
+# Encoding *Response* column into numeric values - 0 for No and 1 for Yes. This will make computations easier for analysis.
+df$Engaged <- ifelse(df$Response == "Yes", 1, 0)
+```
+## Analytics on engaged customers
+Analyzing how different customers behave and react to different marketing strategies
+
+### Overall Engagement Rate
+```{r echo=FALSE}
+engagementRate <- df %>% group_by(Response) %>%
+  summarise(Count=n()) %>%
+  mutate(EngagementRate=Count/nrow(df)*100.0)
+
+kable(engagementRate)
+```
+
+The majority of the customers did not respond to the marketing calls. As shown from the data, only 14% of the customers responded to the marketing calls.
+
+```{r echo=FALSE}
+ggplot(engagementRate, aes(x=Response, y=EngagementRate)) + 
+  geom_bar(width=0.5, stat="identity") + 
+  ggtitle("Engagement Rate") + 
+  xlab("Engaged") + 
+  ylab("Percentage (%)") + 
+  theme(plot.title = element_text(hjust=0.5))
+```
+
+
+
+
+### Engagement Rates By Offer Type
+Different types of offers will work differently for different customers. What types of offers worked best for the engaged customers.
+
+```{r echo=FALSE}
+engagementRateByOfferType <- df %>% 
+  group_by(Renew.Offer.Type) %>%
+  summarise(Count=n(), NumEngaged=sum(Engaged)) %>%
+  mutate(EngagementRate=NumEngaged/Count*100.0)
+kable(engagementRateByOfferType)
+```
+
+*Offer 2* had the highest engagement rate among the customers.
+
+```{r echo=FALSE}
+ggplot(engagementRateByOfferType, aes(x=Renew.Offer.Type, y=EngagementRate)) + 
+  geom_bar(width=0.5, stat="identity") + 
+  ggtitle("Engagement Rates by Offer Type") + 
+  xlab("Offer Type") + 
+  ylab("Engagement Rate (%)") + 
+  theme(plot.title=element_text(hjust = 0.5))
+```
+
+### Engagement Rates By Offer Type and Vehicle Class
+
+Whether there is any noticeable difference in the response rates for each offer type for customers with different vehicle class.
+
+```{r message=FALSE, echo=FALSE}
+options(dplyr.summarise.inform = FALSE)
+engagementRateByOfferTypeVehicleClass <- df %>%
+  group_by(Renew.Offer.Type, Vehicle.Class) %>%
+  summarise(NumEngaged=sum(Engaged)) %>%
+  left_join(engagementRateByOfferType[, c("Renew.Offer.Type", "Count")], by="Renew.Offer.Type") %>%
+  mutate(EngagementRate=NumEngaged/Count*100.0)
+
+kable(engagementRateByOfferTypeVehicleClass)
+```
+ 
+Customers with *Four-Door Car* respond the most frequently for all offer types. However, customers with *SUV* respond with a higher chance to *Offer1* than to *Offer2*. If we see any significant difference in the response rates among different customer segments, we can fine-tune who to target for different set of offers. If we believe customers with *SUV* respond to *Offer1* with a significantly higher chance than to *Offer2*, then we can target *SUV* customers with *Offer1*. On the other hand, if we believe customers with *Two-Door Car* respond to *Offer2* with a significantly higher chance than to other offer types, then we can target *Two-Door Car* owners with *Offer2*. 
+ 
+ 
+```{r echo=FALSE}
+ggplot(engagementRateByOfferTypeVehicleClass, aes(x=Renew.Offer.Type, y=EngagementRate, fill=Vehicle.Class)) + 
+  geom_bar(width=0.5, stat="identity", position="dodge") + 
+  ggtitle("Engagement Rates by Offer Type & Vehicle Class") +
+  xlab("Offer Type") + 
+  ylab("Engagement Rate (%)")+
+  theme(plot.title=element_text(hjust=0.5))
+
+```
+
+### Engagement Rates By Sales channel 
+
+```{r echo=FALSE}
+engagementRateBySalesChannel <- df %>%
+  group_by(Sales.Channel) %>%
+  summarise(Count=n(), NumEngaged=sum(Engaged)) %>%
+  mutate(EngagementRate=NumEngaged/Count*100.0)
+kable(engagementRateBySalesChannel)
+```
+
+
+*Agent* works best in terms of getting responses from the customers. Then, sales through *Web* works the second best.
+
+
+```{r echo=FALSE}
+ggplot(engagementRateBySalesChannel, aes(x=Sales.Channel, y=EngagementRate)) + 
+  geom_bar(width = 0.5, stat="identity") + 
+  ggtitle("Engagement Rates by Sales Channel") +
+  xlab("Sales Channel") +
+  ylab("Engagement Rate (%)") + 
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+### Engagement Rates By Sales Channel And Vehicle Size
+
+```{r echo=FALSE}
+engagementRateBySalesChannelVehicleSize <- df %>%
+  group_by(Sales.Channel, Vehicle.Size) %>%
+  summarise(NumEngaged=sum(Engaged)) %>%
+  left_join(engagementRateBySalesChannel[, c("Sales.Channel", "Count")], by="Sales.Channel") %>%
+  mutate(EngagementRate=NumEngaged/Count * 100.0)
+kable(engagementRateBySalesChannelVehicleSize)
+```
+
+
+Customers with *Medsize* vehicles respond best to all sales channels. The engagement rates across different sales channels differ slightly between *Large* and *Small* vehicle owners. For example, *Small* vehicle owners respond better through *Agent* and *Call Center* channels, while on the other hand, *Large* vehicle owners respond better through the *Branch* and *Web* channels.
+
+
+```{r}
+ggplot(engagementRateBySalesChannelVehicleSize, aes(x=Sales.Channel, y=EngagementRate, fill=Vehicle.Size)) + 
+  geom_bar(width = 0.5, stat="identity", position="dodge") + 
+  ggtitle("Engagement Rates by Sales Channel & Vehicle Size") + 
+  xlab("Sales Channel") + 
+  ylab("Engagement Rate (%)") + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Engagement Rates by Months Since Policy Inception 
+
+```{r echo=FALSE}
+engagementRateByPolicyAge <- df %>% 
+  group_by(Months.Since.Policy.Inception) %>%
+  summarise(Count=n(), NumEngaged=sum(Engaged))  %>%
+  mutate(EngagementRate=NumEngaged/Count*100.0)
+
+kable(head(engagementRateByPolicyAge[order(engagementRateByPolicyAge$EngagementRate, decreasing = TRUE), ] ))
+```
+
+
+Most of the Engagement Rate in Months Since Policy Inception are between 40 to 60.
+
+
+```{r echo=FALSE}
+ggplot(engagementRateByPolicyAge, aes(x=Months.Since.Policy.Inception, y=EngagementRate)) +
+  geom_line() +
+  ylab("Engagement Rate (%)") +
+  xlab("Months Since Policy Inception") +
+  ggtitle("Engagement Rates by Months Since Policy Inception") +
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+## Segmenting Customer Base
+
+Segmenting our customer base by *Customer.Lifetime.Value* and *Months.Since.Policy.Inception*.
+
+### Customer Lifetime Value Summary
+```{r echo=FALSE}
+summary(df$Customer.Lifetime.Value)
+```
+
+### Months Since Policy Inception Summary
+```{r echo=FALSE}
+summary(df$Months.Since.Policy.Inception)
+```
+
+```{r echo=FALSE}
+# Defining customers with a CLV higher than the median as high-CLV customers and those with a CLV below the median as low-CLV customers.
+
+clv_encode_fn <- function(x) {if(x > median(df$Customer.Lifetime.Value)) "High" else "Low"}
+df$CLV.Segment <- sapply(df$Customer.Lifetime.Value, clv_encode_fn)
+```
+```{r echo=FALSE}
+policy_age_encode_fn <- function(x) {if(x > median(df$Months.Since.Policy.Inception)) "High" else "Low"}
+df$Policy.Age.Segment <- sapply(df$Months.Since.Policy.Inception, policy_age_encode_fn)
+```
+```{r echo=FALSE}
+ggplot(
+  df[which(df$CLV.Segment=="High" & df$Policy.Age.Segment=="High"),], 
+  aes(x=Months.Since.Policy.Inception, y=log(Customer.Lifetime.Value))
+) +
+  geom_point(color='red') +
+  geom_point(
+    data=df[which(df$CLV.Segment=="High" & df$Policy.Age.Segment=="Low"),], 
+    color='orange'
+  ) +
+  geom_point(
+    data=df[which(df$CLV.Segment=="Low" & df$Policy.Age.Segment=="Low"),], 
+    color='green'
+  ) +
+  geom_point(
+    data=df[which(df$CLV.Segment=="Low" & df$Policy.Age.Segment=="High"),], 
+    color='blue'
+  ) +
+  ggtitle('Segments by CLV and Policy Age') +
+  xlab("Months Since Policy Inception") +
+  ylab("CLV (in log scale)") +
+  theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+The data points in red represent those customers in the High CLV and High Policy Age segment. Those in orange represent the High CLV and Low Policy Age group, those in blue represent the Low CLV and High Policy Age group, and lastly, those in green represent the Low CLV and Low Policy Age group. 
+
+
+```{r echo=FALSE}
+engagementRateBySegment <- df %>%
+group_by(CLV.Segment, Policy.Age.Segment) %>%
+summarise(Count=n(), NumEngaged=sum(Engaged)) %>%
+mutate(EngagementRate=NumEngaged/Count*100.0)
+kable(engagementRateBySegment)
+```
+
+```{r echo=FALSE}
+ggplot(engagementRateBySegment, aes(x=CLV.Segment, y=EngagementRate,
+fill=Policy.Age.Segment)) +
+geom_bar(width=0.5, stat="identity", position = "dodge") +
+ggtitle('Engagement Rates by Customer Segments') +
+ylab("Engagement Rate (%)") +
+theme(plot.title = element_text(hjust = 0.5))
+```
+
+*High Policy.Age.Segment* has a higher
+engagement than *Low Policy.Age.Segment*. This suggests that those customers
+who have been insured by this company longer respond better. It is also
+noticeable that the *High Policy Age* and *Low CLV* segment has the highest
+engagement rate among the four segments.
+
+
+## Variable Encoding 
+
+Overall engagement rate looks.
+```{r echo=FALSE}
+mean(df$Engaged)
+```
+
+### Categorical Variable Encoding 
+
+```{r echo=FALSE}
+categoricalVars = c(
+  'Sales.Channel', 'Vehicle.Size', 'Vehicle.Class', 'Policy', 'Policy.Type',
+  'EmploymentStatus', 'Marital.Status', 'Education', 'Coverage', 'Gender'
+)
+
+encodedDF <- model.matrix(~.-1, df[categoricalVars])
+```
+
+```{r echo=FALSE}
+kable(head(encodedDF))
+```
+
+### Continuous Features
+
+```{r echo=FALSE}
+continousFeatures <- c(
+  "Customer.Lifetime.Value", "Income", "Monthly.Premium.Auto", 
+  "Months.Since.Last.Claim", "Months.Since.Policy.Inception", 
+  "Number.of.Open.Complaints", "Number.of.Policies", "Total.Claim.Amount"
+)
+
+encodedDF <- cbind(encodedDF, df[continousFeatures])
+kable(head(encodedDF))
+```
+
+## Building Predictive Models
+
+
+### Training and Testing Split
+```{r echo=FALSE}
+
+sample <- sample.split(df$Customer, SplitRatio = .7)
+
+trainX <- as.matrix(subset(encodedDF, sample == TRUE))
+trainY <- as.double(as.matrix(subset(df$Engaged, sample == TRUE)))
+
+testX <- as.matrix(subset(encodedDF, sample == FALSE))
+testY <- as.double(as.matrix(subset(df$Engaged, sample == FALSE)))
+```
+
+#### Dimensions of DataFrame
+
+```{r echo = FALSE}
+dim(encodedDF)
+```
+
+#### Dimensions of Training Set
+
+```{r echo = FALSE}
+dim(trainX)
+```
+
+#### Dimensions of Testing Set
+
+```{r echo = FALSE}
+dim(testX)
+```
+
+### Training a Random Forest Model 
+```{r echo = FALSE}
+rfModel <- randomForest(x=trainX, y=factor(trainY), ntree=200, maxnodes=24)
+```
+
+```{r echo = FALSE}
+kable(getTree(rfModel, 1))
+```
+
+**Note:** Looking at the information about the first tree in the forest. This gives us some information about the structure of the tree. The left
+daughter and right daughter columns tell us the location of this node in the
+given tree. The status column tells us whether the node is terminal (-1) or
+not (1). The prediction column tells us the prediction from this node.
+ 
+
+```{r echo=FALSE, include=FALSE}
+predict(rfModel, trainX, predict.all=TRUE)$individual
+```
+
+With the trained model we can understand the importance or the impact of each feature on the final predictions.
+
+```{r echo=FALSE}
+importance(rfModel)
+```
+
+The **EmploymentStatusRetired** feature seems to be the most important factor in making the final prediction and the **Income, Total.Claim.Amount, and Customer.Lifetime.Value** features follow as the important features.
+
+### Evaluations
+
+```{r echo=FALSE}
+TrainPreds <- as.double(predict(rfModel, trainX)) - 1
+TestPreds <- as.double(predict(rfModel, testX)) - 1
+```
+
+```{r echo=FALSE}
+# - Accuracy, Precision, and Recall
+TrainAccuracy <- mean(trainY == TrainPreds)
+TestAccuracy <- mean(testY == TestPreds)
+print(sprintf('Train Accuracy: %0.4f', TrainAccuracy))
+print(sprintf('Test Accuracy: %0.4f', TestAccuracy))
+
+```
+
+```{r echo=FALSE}
+TrainPrecision <- sum(TrainPreds & trainY) / sum(TrainPreds)
+TestPrecision <- sum(TestPreds & testY) / sum(TestPreds)
+print(sprintf('Train Precision: %0.4f', TrainPrecision))
+print(sprintf('Test Precision: %0.4f', TestPrecision))
+```
+
+```{r echo=FALSE}
+TrainRecall <- sum(TrainPreds & trainY) / sum(trainY)
+TestRecall <- sum(TestPreds & testY) / sum(testY)
+print(sprintf('Train Recall: %0.4f', TrainRecall))
+print(sprintf('Test Recall: %0.4f', TestRecall))
+```
+
+```{r echo=FALSE}
+TrainPredProbs <- as.double(predict(rfModel, trainX, type='prob')[,2])
+TestPredProbs <- as.double(predict(rfModel, testX, type='prob')[,2])
+
+pred <- prediction(TestPredProbs, testY)
+perf <- performance(pred, measure = "tpr", x.measure = "fpr") 
+auc <- performance(pred, measure='auc')@y.values[[1]]
+
+plot(
+  perf, 
+  main=sprintf('Random Forest Model ROC Curve (AUC: %0.2f)', auc), 
+  col='darkorange', 
+  lwd=2
+) + grid() 
+abline(a = 0, b = 1, col='darkgray', lty=3, lwd=2)
+```
+According to the plot, The AUC of our Random Forest Model was 0.77.Compared to the benchmark straight line, which represents the random line(chance), the model performs much better, this shows that the model predictions are much better than random predictions.
+
+
+
